@@ -5,10 +5,11 @@ A super simple FastAPI application that allows students to view and sign up
 for extracurricular activities at Mergington High School.
 """
 
+from email.utils import parseaddr
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
-from pydantic import EmailStr
 import os
 from pathlib import Path
 
@@ -88,19 +89,26 @@ def normalize_email(email: str) -> str:
     return email.strip().lower()
 
 
+def validate_email(email: str) -> str:
+    addr = parseaddr(email.strip())[1]
+    if not addr or "@" not in addr:
+        raise HTTPException(status_code=422, detail="Invalid email address")
+    return addr
+
+
 @app.get("/activities")
 def get_activities():
     return activities
 
 
 @app.post("/activities/{activity_name}/signup")
-def signup_for_activity(activity_name: str, email: EmailStr = Query(...)):
+def signup_for_activity(activity_name: str, email: str = Query(...)):
     """Sign up a student for an activity"""
     if activity_name not in activities:
         raise HTTPException(status_code=404, detail="Activity not found")
 
     activity = activities[activity_name]
-    normalized_email = normalize_email(email)
+    normalized_email = normalize_email(validate_email(email))
     existing_emails = [normalize_email(participant) for participant in activity["participants"]]
 
     if normalized_email in existing_emails:
@@ -109,22 +117,22 @@ def signup_for_activity(activity_name: str, email: EmailStr = Query(...)):
     if len(activity["participants"]) >= activity["max_participants"]:
         raise HTTPException(status_code=400, detail="Activity is full")
 
-    activity["participants"].append(str(email).strip())
-    return {"message": f"Signed up {email} for {activity_name}", "participants": activity["participants"]}
+    activity["participants"].append(normalized_email)
+    return {"message": f"Signed up {normalized_email} for {activity_name}", "participants": activity["participants"]}
 
 
 @app.post("/activities/{activity_name}/unregister")
-def unregister_from_activity(activity_name: str, email: EmailStr = Query(...)):
+def unregister_from_activity(activity_name: str, email: str = Query(...)):
     """Remove a student from an activity"""
     if activity_name not in activities:
         raise HTTPException(status_code=404, detail="Activity not found")
 
     activity = activities[activity_name]
-    normalized_email = normalize_email(email)
+    normalized_email = normalize_email(validate_email(email))
     matching_emails = [participant for participant in activity["participants"] if normalize_email(participant) == normalized_email]
 
     if not matching_emails:
         raise HTTPException(status_code=400, detail="Student is not signed up for this activity")
 
     activity["participants"].remove(matching_emails[0])
-    return {"message": f"Removed {email} from {activity_name}", "participants": activity["participants"]}
+    return {"message": f"Removed {normalized_email} from {activity_name}", "participants": activity["participants"]}
