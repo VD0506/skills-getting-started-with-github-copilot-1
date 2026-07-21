@@ -5,9 +5,10 @@ A super simple FastAPI application that allows students to view and sign up
 for extracurricular activities at Mergington High School.
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
+from pydantic import EmailStr
 import os
 from pathlib import Path
 
@@ -83,39 +84,47 @@ def root():
     return RedirectResponse(url="/static/index.html")
 
 
+def normalize_email(email: str) -> str:
+    return email.strip().lower()
+
+
 @app.get("/activities")
 def get_activities():
     return activities
 
 
 @app.post("/activities/{activity_name}/signup")
-def signup_for_activity(activity_name: str, email: str):
+def signup_for_activity(activity_name: str, email: EmailStr = Query(...)):
     """Sign up a student for an activity"""
-    # Validate activity exists
     if activity_name not in activities:
         raise HTTPException(status_code=404, detail="Activity not found")
 
-    # Get the specific activity
     activity = activities[activity_name]
+    normalized_email = normalize_email(email)
+    existing_emails = [normalize_email(participant) for participant in activity["participants"]]
 
-    # Validate student is not already signed up
-    if email in activity["participants"]:
+    if normalized_email in existing_emails:
         raise HTTPException(status_code=400, detail="Student already signed up for this activity")
-    # Add student
-    activity["participants"].append(email)
+
+    if len(activity["participants"]) >= activity["max_participants"]:
+        raise HTTPException(status_code=400, detail="Activity is full")
+
+    activity["participants"].append(str(email).strip())
     return {"message": f"Signed up {email} for {activity_name}", "participants": activity["participants"]}
 
 
 @app.post("/activities/{activity_name}/unregister")
-def unregister_from_activity(activity_name: str, email: str):
+def unregister_from_activity(activity_name: str, email: EmailStr = Query(...)):
     """Remove a student from an activity"""
     if activity_name not in activities:
         raise HTTPException(status_code=404, detail="Activity not found")
 
     activity = activities[activity_name]
+    normalized_email = normalize_email(email)
+    matching_emails = [participant for participant in activity["participants"] if normalize_email(participant) == normalized_email]
 
-    if email not in activity["participants"]:
+    if not matching_emails:
         raise HTTPException(status_code=400, detail="Student is not signed up for this activity")
 
-    activity["participants"].remove(email)
+    activity["participants"].remove(matching_emails[0])
     return {"message": f"Removed {email} from {activity_name}", "participants": activity["participants"]}
